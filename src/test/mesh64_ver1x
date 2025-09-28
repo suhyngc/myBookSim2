@@ -66,6 +66,6 @@ print_activity = 1;
 
 // Simulation
 sim_type = throughput;
-trace_file = flit_trace.txt;
+//trace_file = flit_trace.txt;
 injection_rate = 0.01;
 

@@ -1004,13 +1004,22 @@ void TrafficManager::_Inject()
             else
                 f->type = Flit::ANY_TYPE;
 
-            // Make sure to track the flit
+            // Set measurement flag based on simulation state
+            f->record = (_sim_state == running);
+            
+            // Track the flit
             _total_in_flight_flits[f->cl].insert(make_pair(f->id, f));
-            if(f->record) {
+            
+            // Only track for measurement if we're in the running state
+            if (_sim_state == running) {
                 _measured_in_flight_flits[f->cl].insert(make_pair(f->id, f));
             }
             
             _partial_packets[input][c].push_back(f);
+            
+            if (f->head) { // Track packet stats for head flits
+                _retired_packets[c].insert(make_pair(f->pid, f));
+            }
         }
     } else {
         // Original packet generation logic

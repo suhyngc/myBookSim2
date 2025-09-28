@@ -67,12 +67,11 @@ print_activity = 1;
 
 // Simulation
 sim_type = throughput;
-trace_file = flit_trace.txt;
+//trace_file = flit_trace.txt;
 injection_rate = 0.01;
 
 
 END Configuration File: mesh64_ver1x
-Using trace file: flit_trace.txt
 Class 0:
 Packet latency average = 35.7905
 	minimum = 30
@@ -297,7 +296,7 @@ Accepted flit rate average = 0.00969792 (1 samples)
 Injected packet size average = 1 (1 samples)
 Accepted packet size average = 1 (1 samples)
 Hops average = 8.50107 (1 samples)
-Total run time 0.270909
+Total run time 0.283376
 router_0_0.bufferMonitor:
 [ 0 ] Type=0:(R#48,W#48) 
 [ 1 ] Type=0:(R#0,W#0) 
