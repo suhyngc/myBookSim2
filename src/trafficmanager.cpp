@@ -851,7 +851,27 @@ void TrafficManager::_GeneratePacket( int source, int stype,
                    << " at time " << time
                    << "." << endl;
     }
-  
+
+    // Open trace file if not already open
+    static bool first_time = true;
+    static ofstream trace_file;
+    if (first_time) {
+        trace_file.open("flit_trace.txt", ios::out);
+        // Write headers
+        trace_file << "Time\t"
+                  << "Source\t"
+                  << "Destination\t"
+                  << "PacketType\t"
+                  << "FlitID\t"
+                  << "PacketID\t"
+                  << "FlitPosition\t"
+                  << "IsHead\t"
+                  << "IsTail" << endl;
+        first_time = false;
+    } else if (!trace_file.is_open()) {
+        trace_file.open("flit_trace.txt", ios::out | ios::app);
+    }
+    
     for ( int i = 0; i < size; ++i ) {
         Flit * f  = Flit::New();
         f->id     = _cur_id++;
@@ -863,6 +883,21 @@ void TrafficManager::_GeneratePacket( int source, int stype,
         f->ctime  = time;
         f->record = record;
         f->cl     = cl;
+
+        // Write trace to file
+        trace_file << time << "\t"  // Time
+                  << source << "\t"  // Source
+                  << packet_destination << "\t"  // Destination
+                  << ((packet_type == Flit::READ_REQUEST) ? "READ_REQ" :
+                      (packet_type == Flit::WRITE_REQUEST) ? "WRITE_REQ" :
+                      (packet_type == Flit::READ_REPLY) ? "READ_REPLY" :
+                      (packet_type == Flit::WRITE_REPLY) ? "WRITE_REPLY" : "ANY") << "\t"  // Type
+                  << f->id << "\t"  // FlitID
+                  << pid << "\t"  // PacketID
+                  << i << "/" << size-1 << "\t"  // Position
+                  << (i == 0 ? "1" : "0") << "\t"  // Head
+                  << (i == size-1 ? "1" : "0") << endl;  // Tail
+        trace_file.flush();
 
         _total_in_flight_flits[f->cl].insert(make_pair(f->id, f));
         if(record) {
