@@ -286,6 +286,9 @@ BookSimConfig::BookSimConfig( )
 
   AddStrField("stats_out", "");
 
+  // Trace file for reading traffic pattern
+  AddStrField("trace_file", "");
+
 #ifdef TRACK_FLOWS
   AddStrField("injected_flits_out", "");
   AddStrField("received_flits_out", "");

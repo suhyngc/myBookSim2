@@ -32,8 +32,11 @@
 #include <map>
 #include <set>
 #include <cassert>
+#include <string>
+#include <vector>
 
 #include "module.hpp"
+#include "tracereader.hpp"
 #include "config_utils.hpp"
 #include "network.hpp"
 #include "flit.hpp"
@@ -46,6 +49,7 @@
 
 //register the requests to a node
 class PacketReplyInfo;
+class TraceReader;  // Forward declaration
 
 class TrafficManager : public Module {
 
@@ -240,6 +244,10 @@ protected:
 
   //flits to watch
   ostream * _stats_out;
+
+  // Trace-based traffic generation
+  class TraceReader* _trace_reader;
+  bool _use_trace_file;
 
 #ifdef TRACK_FLOWS
   vector<vector<int> > _injected_flits;

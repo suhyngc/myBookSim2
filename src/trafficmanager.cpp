@@ -39,6 +39,7 @@
 #include "random_utils.hpp" 
 #include "vc.hpp"
 #include "packet_reply_info.hpp"
+#include "tracereader.hpp"
 
 TrafficManager * TrafficManager::New(Configuration const & config,
                                      vector<Network *> const & net)
@@ -58,6 +59,19 @@ TrafficManager * TrafficManager::New(Configuration const & config,
 TrafficManager::TrafficManager( const Configuration &config, const vector<Network *> & net )
     : Module( 0, "traffic_manager" ), _net(net), _empty_network(false), _deadlock_timer(0), _reset_time(0), _drain_time(-1), _cur_id(0), _cur_pid(0), _time(0)
 {
+    string trace_file = config.GetStr("trace_file");
+    _use_trace_file = (trace_file != "");
+    if (_use_trace_file) {
+        cout << "Using trace file: " << trace_file << endl;
+        _trace_reader = new TraceReader(trace_file);
+        // If using trace file, initialize class 0 for trace-based traffic
+        if (_classes > 0) {
+            _traffic[0] = "trace";
+            _class_priority[0] = 0;
+        }
+    } else {
+        _trace_reader = nullptr;
+    }
 
     _nodes = _net[0]->NumNodes( );
     _routers = _net[0]->NumRouters( );
@@ -588,6 +602,10 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
 
 TrafficManager::~TrafficManager( )
 {
+    if (_trace_reader) {
+        delete _trace_reader;
+        _trace_reader = nullptr;
+    }
 
     for ( int source = 0; source < _nodes; ++source ) {
         for ( int subnet = 0; subnet < _subnets; ++subnet ) {
@@ -954,39 +972,80 @@ void TrafficManager::_GeneratePacket( int source, int stype,
     }
 }
 
-void TrafficManager::_Inject(){
+void TrafficManager::_Inject()
+{
+    if (_use_trace_file) {
+        // Get all flits that should be injected at current time
+        vector<TraceReader::FlitEvent> events = _trace_reader->getNextFlits(_time);
+        
+        for (const auto& event : events) {
+            int input = event.source;
+            int c = 0;  // Use class 0 for trace-based traffic
+            
+            Flit* f = Flit::New();
+            f->id = event.flitId;
+            f->pid = event.packetId;
+            f->src = event.source;
+            f->dest = event.destination;
+            f->ctime = _time;
+            f->cl = c;
+            f->head = event.isHead;
+            f->tail = event.isTail;
+            
+            // Set packet type based on trace
+            if (event.type == "READ_REQ")
+                f->type = Flit::READ_REQUEST;
+            else if (event.type == "WRITE_REQ")
+                f->type = Flit::WRITE_REQUEST;
+            else if (event.type == "READ_REPLY")
+                f->type = Flit::READ_REPLY;
+            else if (event.type == "WRITE_REPLY")
+                f->type = Flit::WRITE_REPLY;
+            else
+                f->type = Flit::ANY_TYPE;
 
-    for ( int input = 0; input < _nodes; ++input ) {
-        for ( int c = 0; c < _classes; ++c ) {
-            // Potentially generate packets for any (input,class)
-            // that is currently empty
-            if ( _partial_packets[input][c].empty() ) {
-                bool generated = false;
-                while( !generated && ( _qtime[input][c] <= _time ) ) {
-                    int stype = _IssuePacket( input, c );
+            // Make sure to track the flit
+            _total_in_flight_flits[f->cl].insert(make_pair(f->id, f));
+            if(f->record) {
+                _measured_in_flight_flits[f->cl].insert(make_pair(f->id, f));
+            }
+            
+            _partial_packets[input][c].push_back(f);
+        }
+    } else {
+        // Original packet generation logic
+        for ( int input = 0; input < _nodes; ++input ) {
+            for ( int c = 0; c < _classes; ++c ) {
+                // Potentially generate packets for any (input,class)
+                // that is currently empty
+                if ( _partial_packets[input][c].empty() ) {
+                    bool generated = false;
+                    while( !generated && ( _qtime[input][c] <= _time ) ) {
+                        int stype = _IssuePacket( input, c );
 	  
-                    if ( stype != 0 ) { //generate a packet
-                        _GeneratePacket( input, stype, c, 
-                                         _include_queuing==1 ? 
-                                         _qtime[input][c] : _time );
-                        generated = true;
+                        if ( stype != 0 ) { //generate a packet
+                            _GeneratePacket( input, stype, c, 
+                                           _include_queuing==1 ? 
+                                           _qtime[input][c] : _time );
+                            generated = true;
+                        }
+                        // only advance time if this is not a reply packet
+                        if(!_use_read_write[c] || (stype >= 0)){
+                            ++_qtime[input][c];
+                        }
                     }
-                    // only advance time if this is not a reply packet
-                    if(!_use_read_write[c] || (stype >= 0)){
-                        ++_qtime[input][c];
-                    }
-                }
 	
-                if ( ( _sim_state == draining ) && 
-                     ( _qtime[input][c] > _drain_time ) ) {
-                    _qdrained[input][c] = true;
+                    if ( ( _sim_state == draining ) && 
+                         ( _qtime[input][c] > _drain_time ) ) {
+                        _qdrained[input][c] = true;
+                    }
                 }
             }
         }
     }
 }
 
-void TrafficManager::_Step( )
+void TrafficManager::_Step()
 {
     bool flits_in_flight = false;
     for(int c = 0; c < _classes; ++c) {
@@ -1309,7 +1368,7 @@ void TrafficManager::_Step( )
 
 }
   
-bool TrafficManager::_PacketsOutstanding( ) const
+bool TrafficManager::_PacketsOutstanding() const
 {
     for ( int c = 0; c < _classes; ++c ) {
         if ( _measure_stats[c] ) {
@@ -1335,7 +1394,7 @@ bool TrafficManager::_PacketsOutstanding( ) const
     return false;
 }
 
-void TrafficManager::_ClearStats( )
+void TrafficManager::_ClearStats()
 {
     _slowest_flit.assign(_classes, -1);
     _slowest_packet.assign(_classes, -1);
@@ -1376,7 +1435,7 @@ void TrafficManager::_ClearStats( )
     _reset_time = _time;
 }
 
-void TrafficManager::_ComputeStats( const vector<int> & stats, int *sum, int *min, int *max, int *min_pos, int *max_pos ) const 
+void TrafficManager::_ComputeStats(const vector<int> & stats, int *sum, int *min, int *max, int *min_pos, int *max_pos) const 
 {
     int const count = stats.size();
     assert(count > 0);
@@ -1415,7 +1474,7 @@ void TrafficManager::_ComputeStats( const vector<int> & stats, int *sum, int *mi
     }
 }
 
-void TrafficManager::_DisplayRemaining( ostream & os ) const 
+void TrafficManager::_DisplayRemaining(ostream & os) const 
 {
     for(int c = 0; c < _classes; ++c) {
 
@@ -1449,7 +1508,7 @@ void TrafficManager::_DisplayRemaining( ostream & os ) const
     }
 }
 
-bool TrafficManager::_SingleSim( )
+bool TrafficManager::_SingleSim()
 {
     int converged = 0;
   
@@ -1643,7 +1702,7 @@ bool TrafficManager::_SingleSim( )
     return ( converged > 0 );
 }
 
-bool TrafficManager::Run( )
+bool TrafficManager::Run()
 {
     for ( int sim = 0; sim < _total_sims; ++sim ) {
 
